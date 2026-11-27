@@ -1,0 +1,51 @@
+# ============================================================================
+# terraform.tfvars.example — copy to terraform.tfvars and fill in before apply
+# ============================================================================
+
+region                  = "cn-north-1"
+project_name            = "fgs-unicorn"
+
+# OBS bucket that holds the FGS function jar (created by Terraform).
+function_code_bucket      = "fgs-unicorn-artifacts"
+function_code_object_key  = "function-code/unicorn-stock-broker-1.0-fgs.jar"
+
+# FGS sizing.
+function_memory_size  = 2048
+function_timeout      = 200
+
+# Process-level snapshot acceleration:
+#   1 = warm reserved instance pool — the Java cold start is paid once,
+#       not on every request
+#   0 = no reserved instances — each cold start runs the full JVM startup
+function_reserved_instance_count = 1
+
+# ⚠ Sensitive — set this to a real password before `terraform apply`.
+# This is the GeminiDB instance administrator password. It is also injected
+# into the function as GEMINIDB_PASSWORD (user = rwuser), because the
+# DynamoDB-compatible data plane authenticates with the instance database
+# account rather than with IAM credentials.
+# Rules: 8–32 characters, at least two of uppercase / lowercase / digits /
+# special characters ~!@#%^*-_=+?
+# Never commit terraform.tfvars.
+geminidb_password = "REPLACE_ME_WITH_A_STRONG_PASSWORD"
+
+# ⚠ Required — spec_code of the GeminiDB instance flavor.
+# DynamoDB-compatible instances run on the Cassandra compute engine, so the
+# flavor code is a Cassandra-family code (geminidb.cassandra.*) — there is no
+# geminidb.dynamodb.* family. The compatible interface itself is selected via
+# datastore.type="DynamoDB" in geminidb.tf.
+# To list the codes available in your region, query the huaweicloud_geminidb_flavors
+# data source with engine_name OMITTED (passing engine_name makes the API return
+# "Invalid database type"; leaving it unset returns the cassandra-family codes,
+# which are exactly what DynamoDB-compatible instances use).
+# cn-north-1 在售 small spec 以 huaweicloud_geminidb_flavors 数据源（output: geminidb_available_flavors）
+# 本地 plan 实测为准，起步通常是 geminidb.cassandra.large.4 (2 vCPU / 8 GB)；若 plan 报
+# DBS.280445 缺货，改选 output 列出的在售规格填入下方 geminidb_flavor。
+geminidb_flavor = "geminidb.cassandra.xlarge.4"
+
+# Your Huawei Cloud account domain (e.g. "hwstaff_xxx").
+# Find it in the console: 顶部用户头像 → 我的凭证 → 账号名
+domain_name = "your-huaweicloud-domain"
+
+# DynamoDB-compatible table name.
+table_name  = "TransactionsTable"

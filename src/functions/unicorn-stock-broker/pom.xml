@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Unicorn Stock Broker — FunctionGraph Function (Huawei Cloud)
+  Standalone Java function; deploys as an OBS-hosted jar to huaweicloud_fgs_function.
+  Notes:
+   - The DynamoDB client is retained ONLY as a wire-protocol client: GeminiDB
+     DynamoDB-compatible instances accept SigV4-signed DynamoDB calls, which is
+     the documented way to reach their data plane.
+   - GeminiDB credentials (instance database account rwuser + instance
+     administrator password) are injected as environment variables by
+     Terraform, so the jar contains no secrets.
+   - The FunctionGraph Java runtime SDK is NOT published to Maven Central. It is
+     distributed as the downloadable "fss-java-sdk" package; place it at
+     lib/fss-java-sdk.jar before building (see this module's README).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.unicorn</groupId>
+    <artifactId>unicorn-stock-broker</artifactId>
+    <version>1.0</version>
+    <packaging>jar</packaging>
+    <name>unicorn-stock-broker FunctionGraph function</name>
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <dynamodb.sdk.version>2.20.0</dynamodb.sdk.version>
+    </properties>
+
+    <dependencies>
+        <!-- DynamoDB Java SDK v2 — used only as a wire-protocol client for the
+             GeminiDB DynamoDB-compatible endpoint. The GAV below is intrinsic
+             to that SDK; SDK + endpointOverride + the instance database
+             credentials is the documented way to reach the endpoint. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>dynamodb</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- FunctionGraph Java runtime SDK — supplies com.huawei.services.runtime.Context,
+             the type of the second handler parameter. FunctionGraph Java handler
+             signature is required to be `(userParam, Context)`, so this dependency
+             is MANDATORY for compile-time.
+
+             IMPORTANT: Huawei Cloud distributes this SDK ONLY as a downloadable jar
+             ("fss-java-sdk", verification file fss-java-sdk-2.0.5.sha256). It is NOT
+             published to Maven Central, so no GAV coordinate will resolve for it.
+
+             Prerequisite: download it from the FunctionGraph SDK download page and
+             place it here as lib/fss-java-sdk.jar before running `mvn package`
+             (see README.md in this module for the download URL).
+
+             It is declared `system` scope deliberately: the FunctionGraph runtime
+             already provides these classes on the execution classpath, so the jar
+             must NOT be bundled into the shaded artifact. -->
+        <dependency>
+            <groupId>com.huawei.services.runtime</groupId>
+            <artifactId>fss-java-sdk</artifactId>
+            <version>2.0.5</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/fss-java-sdk.jar</systemPath>
+        </dependency>
+
+        <!-- Jackson for request/response JSON (APIG proxy events use the
+             standard proxy payload format). -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.15.2</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.9</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>2.0.9</version>
+        </dependency>
+    </dependencies>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${dynamodb.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <finalName>unicorn-stock-broker-1.0</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <!-- Compile to Java 11 bytecode: keeps the artifact runnable on
+                         the FunctionGraph Java8/Java11 runtimes (and 17, which is
+                         backward compatible). Do NOT raise this without first
+                         confirming the target FGS runtime supports that class
+                         file version. -->
+                    <source>11</source>
+                    <target>11</target>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <shadedClassifierName>fgs</shadedClassifierName>
+                            <artifactSet>
+                                <!-- The FunctionGraph runtime already provides
+                                     com.huawei.services.runtime.* on the execution
+                                     classpath, so keep the SDK out of the uber jar
+                                     (matches the system-scope comment above). -->
+                                <excludes>
+                                    <exclude>com.huawei.services.runtime:fss-java-sdk</exclude>
+                                </excludes>
+                            </artifactSet>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.unicorn.broker.FunctionGraphHandler</mainClass>
+                                </transformer>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
